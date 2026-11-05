@@ -74,7 +74,7 @@ def calc_ss_statistic_ours(s1: Subset, s2: Subset, H: np.ndarray, z: np.ndarray,
 
     H2 = H[s2]
     z2 = z[s2]
-    d = np.array([[0.0, alpha, 0.0]]).T # Diagonal weighting matrix
+    d = np.array([[alpha, 1.0, alpha]]).T # Diagonal weighting matrix
     p = (H2.T * d) @ (z2 - H2 @ x1) # DH^T(z - Hx)
 
     # Calculate eigenvalue upper and lower bounds using Gershgorin circles 
@@ -91,8 +91,8 @@ def calc_ss_statistic_ours(s1: Subset, s2: Subset, H: np.ndarray, z: np.ndarray,
     sigma2_lb = 1 / eval_upper - P1[Y, Y]
 
     if 1 / eval_upper < 1 / eval_lower:
-        ss_ub = p / (sigma2_lb * eval_lower)
-        ss_lb = p / (sigma2_ub * eval_upper)
+        ss_ub = p[1,0] / (sigma2_lb * eval_lower)
+        ss_lb = p[1,0] / (sigma2_ub * eval_upper)
 
         # If we can, early return using bounds!
         if ss_ub < NT.T:
