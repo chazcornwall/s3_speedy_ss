@@ -5,7 +5,7 @@ import heapq
 from copy import deepcopy
 
 
-Subset = List[bool]
+Subset = np.ndarray[Tuple[int], np.dtype[np.bool_]]
 
 
 class SSFDEParams(BaseModel):
@@ -17,8 +17,8 @@ class SSFDE:
 
     class PqType:
 
-        def __init__(self, subset: Subset = [True], meas: int = 0):
-            self.curr_subset : List[bool] = subset
+        def __init__(self, subset: Subset = np.array([True]), meas: int = 0):
+            self.curr_subset : Subset = subset
             self.prev_meas : int = meas # This informs how to expand the current mask
 
     def __init__(self, params: SSFDEParams):

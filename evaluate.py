@@ -19,7 +19,7 @@ def create_measurement_model(x0: np.ndarray, measurements: List[MeasType]) -> Tu
         z[i, 0] = measurements[i][0]
         s = measurements[i][1]
         H[i,0:3] = (x0 - s).T / np.linalg.norm(x0 - s)
-        H[i,3] = 1
+        H[i,3] = 1 # derivative of bias term
     return z, H
 
 # Use datasets from this directory! https://github.com/TUC-ProAut/libRSF/tree/master/datasets/UrbanNav

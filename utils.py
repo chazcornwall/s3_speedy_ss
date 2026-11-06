@@ -1,11 +1,12 @@
 import numpy as np
 from scipy import stats
 from ssfde import Subset
+from pydantic import BaseModel, ConfigDict
 from typing import Dict, Tuple, Union, List
 
-Solution = Tuple[np.ndarray, np.ndarray]
+Solution = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
-Stat = Union[float, None]
+Stat = Tuple[bool, float]
 SOLUTION_HASH_MAP : Dict[Tuple[bool, ...], Solution] = {}
 
 
@@ -22,26 +23,99 @@ class NormalThreshold:
         """
         self.T = stats.chi2.ppf(1 - creq, 1) # ppf is the inverse cdf
 
-    def test(self, x1: np.ndarray, x2: np.ndarray, P1: np.ndarray, P2: np.ndarray) -> Stat:
-        # Calculate statistics
-        xdelta = x1[Y, 0] - x2[Y, 0]
-        sigma2delta = P1[Y, Y] - P2[Y, Y] 
+    def test(self, xk: np.ndarray, xr: np.ndarray, Pk: np.ndarray, Pr: np.ndarray, index: int) -> Stat:
+        """
+        Calculate SS statistic where xk has less measurements than xr
+        """
+        assert index >= 0 and index < xk.shape[0], "Index must be a valid state index!"
+        xdelta = xr[index, 0] - xk[index, 0]
+        sigma2delta = Pk[index, index] - Pr[index, index] 
 
         test_stat = xdelta**2 / sigma2delta
-        if test_stat < self.T:
-            return test_stat
-        else:
-            return None
+        return (test_stat < self.T, test_stat)
 
 
-def mle(H: np.ndarray, z: np.ndarray) -> Solution:
+def bounded_subset(sf: Subset, sk: Subset, sc: Subset) -> bool:
+    """
+    Check if sk is bounded by sf (s "floor") and sc (s "ceiling")
+    """
+    return np.array_equal(sf, sf * sk) and np.array_equal(sk, sk * sc)
+
+def create_B_from_subset(s: Subset) -> np.ndarray:
+    n_subset = int(np.sum(s)) # Number of measurements in the subset
+    n = s.shape[0] # Total number of measurements
+    B = np.zeros((n, n_subset))
+
+    k = 0
+    for i in range(n_subset):
+        for j in range(k, n):
+            if s[j]:
+                B[j, i] = 1.0
+                k = j + 1
+                break
+    return B
+
+
+class SolutionSeparationBoundsParams(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    H: np.ndarray
+    z: np.ndarray
+    Solr: Solution
+    Solc: Solution
+    Solf: Solution
+    sr: Subset
+    sc: Subset
+    sf: Subset
+
+
+class SolutionSeparationBounds:
+
+    def __init__(self, params: SolutionSeparationBoundsParams):
+        self.__params = params
+        assert bounded_subset(self.__params.sf, self.__params.sc, self.__params.sr), "Ceiling subset (sc) is not bounded by Floor subset (sf) and Roof subset (sr)!"
+        
+        self.__trIc = np.trace(self.__params.Solc[2])
+        self.__Pc = self.__params.Solc[1]
+
+        self.__Pf = self.__params.Solf[1]
+        self.__trPf = np.trace(self.__params.Solf[1])
+
+        self.__Pr = self.__params.Solr[1]
+
+        Br = create_B_from_subset(self.__params.sr)
+        self.__Hr = Br.T @ self.__params.H
+        self.__xr = self.__params.Solr[0]
+        self.__yr = self.__params.z - self.__params.H @ self.__xr
+        
+
+    def calcBounds(self, sk: Subset, index: int) -> Tuple[float, float]:
+        """
+        Calculates bounds for the statistic: (xk - xr)^2 / (sigma2k - sigma2r)
+        """
+        assert bounded_subset(self.__params.sf, sk, self.__params.sc), "Current subset (sk) is not bounded by Floor subset (sf) and Ceiling subset (sc)"
+        assert index >= 0 and index < self.__xr.shape[0], "Index must be a valid state index!"
+
+        dp = ((self.__params.H.T * sk)[[index], :] @ (self.__yr.T * sk).T)**2
+        sigma2f = self.__Pf[index, index]
+        sigma2r = self.__Pr[index, index]
+        sigma2c = self.__Pc[index, index]
+
+        lb = dp / (self.__trIc * (sigma2f - sigma2r))
+        ub = self.__trPf * dp / (sigma2c - sigma2r) 
+        return lb, ub
+
+
+def mle(H: np.ndarray, z: np.ndarray, sk: Subset) -> Solution:
     """
     Calculate MLE estimate with measurement model z = Hx + w where w is unit-normal, white noise
     """
-    FI = H.T @ H # Fisher Information for H2 model
-    x = np.linalg.solve(FI, H.T @ z)
+    Bk = create_B_from_subset(sk)
+    Hk = Bk.T @ H
+    zk = Bk.T @ z
+    FI = Hk.T @ Hk # Fisher Information
+    x = np.linalg.solve(FI, Hk.T @ zk)
     P = np.linalg.inv(FI)
-    return x, P 
+    return x, P, FI
 
 
 def calc_ss_statistic_baseline(s1: Subset, s2: Subset, H: np.ndarray, z: np.ndarray, NT: NormalThreshold) -> Stat:
@@ -110,8 +184,8 @@ def calc_ss_statistic_ours(s1: Subset, s2: Subset, H: np.ndarray, z: np.ndarray,
     return NT.test(x1, x2, P1, P2)
 
 
-def create_subset_mask(faults: List[int], N: int) -> List[bool]:
-    all_in_view_subset = N * [True]
+def create_subset_mask(faults: List[int], N: int) -> Subset:
+    all_in_view_subset = np.array(N * [True], dtype=bool)
     for fault in faults:
         all_in_view_subset[fault] = False
     return all_in_view_subset
