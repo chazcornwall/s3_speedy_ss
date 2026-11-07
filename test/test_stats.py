@@ -40,8 +40,11 @@ def test_stats():
         Solc = utils.mle(Hnorm, znorm, sc)
         Solf = utils.mle(Hnorm, znorm, sf)
 
+        print(f"Pc: {Solc[1]}")
+        print(f"{np.linalg.eigvals(Solc[1])}")
+
         # Create bounds objects
-        ssbp = utils.SolutionSeparationBoundsParams(H=H, z=z, Solr=Solr, Solc=Solc, Solf=Solf, sr=sr, sc=sc, sf=sf)
+        ssbp = utils.SolutionSeparationBoundsParams(H=Hnorm, z=znorm, Solr=Solr, Solc=Solc, Solf=Solf, sr=sr, sc=sc, sf=sf)
         ssb = utils.SolutionSeparationBounds(ssbp)
 
         sk = utils.create_subset_mask([1,2], N)
@@ -49,9 +52,13 @@ def test_stats():
 
         # Calc truth
         xk, Pk, Ik = utils.mle(Hnorm, znorm, sk)
+        print(f"Pk: {Pk}")
+        print(f"{np.linalg.eigvals(Pk)}")
         _,stat = NT.test(xk, Solr[0], Pk, Solr[1], 1)
 
-        print(f"{ss_lb} < {stat} < {ss_ub}")
+        print(f"ssb: {ss_lb} < {stat} < {ss_ub}")
+        assert ss_lb < stat
+        assert ss_ub > stat
 
         xr = Solr[0]
         Dinv = np.diag([1e-8, 1, 1e-8])
@@ -64,9 +71,9 @@ def test_stats():
 
         dp = np.linalg.norm(Dinvsqrt @ Hk.T @ (zk - Hk @ xr))**2
         QI = Dinvsqrt @ Hk.T @ Hk @ Dsqrt
-        lb = dp / np.trace(QI.T @ QI)
+        lb = dp / np.linalg.norm(QI, ord=2)**2
         Q = Dinvsqrt @ np.linalg.inv(Hk.T @ Hk) @ Dsqrt
-        ub = dp * np.trace(np.linalg.inv(Hk.T @ Hk)) #  np.linalg.norm(Q, ord=2)
+        ub = dp * np.linalg.norm(Q, ord=2)**2
         print(np.trace(Q))
         print(np.trace(Q.T @ Q))
         print(np.linalg.eigvals(Q.T @ Q))

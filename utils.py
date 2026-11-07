@@ -76,9 +76,13 @@ class SolutionSeparationBounds:
         
         self.__trIc = np.trace(self.__params.Solc[2])
         self.__Pc = self.__params.Solc[1]
+        Bc = create_B_from_subset(self.__params.sc)
+        self.__Hc = Bc.T @ self.__params.H
 
         self.__Pf = self.__params.Solf[1]
         self.__trPf = np.trace(self.__params.Solf[1])
+        Bf = create_B_from_subset(self.__params.sf)
+        self.__Hf = Bf.T @ self.__params.H
 
         self.__Pr = self.__params.Solr[1]
 
@@ -96,12 +100,22 @@ class SolutionSeparationBounds:
         assert index >= 0 and index < self.__xr.shape[0], "Index must be a valid state index!"
 
         dp = ((self.__params.H.T * sk)[[index], :] @ (self.__yr.T * sk).T)**2
+
+        alpha = np.zeros((3, 1))
+        alpha[index, 0] = 1
+        Bk = create_B_from_subset(sk)
+        Hk = Bk.T @ self.__params.H
+        dp = Hk.T @ Bk.T @ (self.__yr)
+        Pk = np.linalg.inv(Hk.T @ Hk)
+        
         sigma2f = self.__Pf[index, index]
         sigma2r = self.__Pr[index, index]
         sigma2c = self.__Pc[index, index]
 
         lb = dp / (self.__trIc * (sigma2f - sigma2r))
         ub = self.__trPf * dp / (sigma2c - sigma2r) 
+        lb = np.linalg.norm(alpha.T @ self.__Pc @ dp)**2 / (sigma2f - sigma2r)
+        ub = np.linalg.norm(alpha.T @ Pk @ dp)**2 / (sigma2c - sigma2r)
         return lb, ub
 
 
