@@ -16,22 +16,25 @@ Y = 1
 
 class NormalThreshold:
 
-    def __init__(self, creq: float):
+    def __init__(self, creq: float, dof: int = 1):
         """
         Calculate normalized SS statistic threshold (|x1 - x2|/sigma2) using continuity requirement, i.e. probability of false alarms:
         (1 - probthresh) = creq
         """
-        self.T = stats.chi2.ppf(1 - creq, 1) # ppf is the inverse cdf
+        assert dof > 0, "ChiSquare degrees of freedom (dof) must be an integer 1 or greater!"
+        self.dof = dof
+        self.T = stats.chi2.ppf(1 - creq, dof) # ppf is the inverse cdf
 
-    def test(self, xk: np.ndarray, xr: np.ndarray, Pk: np.ndarray, Pr: np.ndarray, index: int) -> Stat:
+    def test(self, xk: np.ndarray, xr: np.ndarray, Pk: np.ndarray, Pr: np.ndarray) -> Stat:
         """
         Calculate SS statistic where xk has less measurements than xr
         """
-        assert index >= 0 and index < xk.shape[0], "Index must be a valid state index!"
-        xdelta = xr[index, 0] - xk[index, 0]
-        sigma2delta = Pk[index, index] - Pr[index, index] 
+        assert self.dof == xk.shape[0], "dof must equal the number of state dimensions!"
+        xdelta = xr - xk
+        Pdeltainv = np.linalg.inv(Pk - Pr)
+        print(f"Pdeltainv = {Pdeltainv}")
 
-        test_stat = xdelta**2 / sigma2delta
+        test_stat = (xdelta.T @ Pdeltainv @ xdelta)
         return (test_stat < self.T, test_stat)
 
 
@@ -74,17 +77,29 @@ class SolutionSeparationBounds:
         self.__params = params
         assert bounded_subset(self.__params.sf, self.__params.sc, self.__params.sr), "Ceiling subset (sc) is not bounded by Floor subset (sf) and Roof subset (sr)!"
         
-        self.__trIc = np.trace(self.__params.Solc[2])
+        self.__trIc2 = np.max(np.linalg.eigvals(self.__params.Solc[2]))**2 # np.trace(self.__params.Solc[2])**2
         self.__Pc = self.__params.Solc[1]
         Bc = create_B_from_subset(self.__params.sc)
         self.__Hc = Bc.T @ self.__params.H
 
         self.__Pf = self.__params.Solf[1]
-        self.__trPf = np.trace(self.__params.Solf[1])
+        self.__trPf2 = np.max(np.linalg.eigvals(self.__params.Solf[1]))**2 #  np.trace(self.__params.Solf[1])**2
         Bf = create_B_from_subset(self.__params.sf)
         self.__Hf = Bf.T @ self.__params.H
 
         self.__Pr = self.__params.Solr[1]
+
+        print(f"Eigvals of Pf - Pr: {np.linalg.eigvals(self.__Pf - self.__Pr)}")
+        eigvals, Q = np.linalg.eig(self.__Pf - self.__Pr)
+        Lambda = np.diag(eigvals)
+        self.__trsqrtPfPr2 = np.max(np.linalg.eigvals(Q @ np.sqrt(Lambda) @ Q.T))**2 # np.trace(Q @ np.sqrt(Lambda) @ Q.T)**2
+
+        eigvals, Q = np.linalg.eig(np.linalg.inv(self.__Pc - self.__Pr))
+        Lambda = np.diag(eigvals)
+        self.__trinvsqrtPcPr2 = np.max(np.linalg.eigvals(Q @ np.sqrt(Lambda) @ Q.T))**2 # np.trace(Q @ np.sqrt(Lambda) @ Q.T)**2
+        print(f"Pc - Pr = {self.__Pc - self.__Pr}")
+        print(f"Eigvals of Pc - Pr: {np.linalg.eigvals(self.__Pc - self.__Pr)}")
+        print(f"inv(Pc - Pr) = {np.linalg.inv(self.__Pc - self.__Pr)}")
 
         Br = create_B_from_subset(self.__params.sr)
         self.__Hr = Br.T @ self.__params.H
@@ -112,10 +127,15 @@ class SolutionSeparationBounds:
         sigma2r = self.__Pr[index, index]
         sigma2c = self.__Pc[index, index]
 
-        lb = dp / (self.__trIc * (sigma2f - sigma2r))
-        ub = self.__trPf * dp / (sigma2c - sigma2r) 
-        lb = np.linalg.norm(alpha.T @ self.__Pc @ dp)**2 / (sigma2f - sigma2r)
-        ub = np.linalg.norm(alpha.T @ Pk @ dp)**2 / (sigma2c - sigma2r)
+        # lb = dp / (self.__trIc * (sigma2f - sigma2r))
+        # ub = self.__trPf * dp / (sigma2c - sigma2r) 
+        # lb = np.linalg.norm(alpha.T @ self.__Pc @ dp)**2 / (sigma2f - sigma2r)
+        # ub = np.linalg.norm(alpha.T @ Pk @ dp)**2 / (sigma2c - sigma2r)
+        print(f"dp = {np.linalg.norm(dp)**2}")
+        print(f"self.__trsqrtPfPr2 = {self.__trsqrtPfPr2}")
+        print(f"self.__trinvsqrtPcPr2 = {self.__trinvsqrtPcPr2}")
+        lb = np.linalg.norm(dp)**2 / (self.__trsqrtPfPr2 * self.__trIc2)
+        ub = np.linalg.norm(dp)**2 * self.__trinvsqrtPcPr2 * self.__trPf2
         return lb, ub
 
 
