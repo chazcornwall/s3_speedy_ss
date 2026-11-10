@@ -1,6 +1,8 @@
 import ssfde
 import utils
 import numpy as np
+from itertools import combinations
+import time
 
 def test_B_creation():
     N = 10
@@ -10,8 +12,9 @@ def test_B_creation():
 
 def test_stats():
 
-    for i in range(1000):
-        N = 10 # Measurement dimension
+    start_time = time.perf_counter()
+    for i in range(1):
+        N = 20 # Measurement dimension
         M = 3 # State dimension
         NT = utils.NormalThreshold(1e-9, dof=M)
 
@@ -21,10 +24,13 @@ def test_stats():
         L = np.linalg.cholesky(R)
         Linv = np.linalg.inv(L)
 
+        # Create random faults
+        f = 10 * np.random.randn(N, 1)
+
         # Generate a random measurement
         H = np.random.randn(N, M)
         x_gt = np.random.randn(M, 1)
-        z = H @ x_gt + L @ np.random.randn(N,1)
+        z = H @ x_gt + L @ np.random.randn(N,1) + f
 
         # Normalize measurement model
         Hnorm = Linv @ H
@@ -32,54 +38,50 @@ def test_stats():
 
         # Defined Bounded Subset 
         sr = utils.create_subset_mask([], N)
-        sc = utils.create_subset_mask([1,2,3], N)
-        sf = utils.create_subset_mask([1,2,3,4,5,6], N)
+        sc = utils.create_subset_mask([1], N)
+        sf = utils.create_subset_mask([1,2,3,4,5,6,7,8,9,10,11,12,13], N)
 
         # Find solutions at bounds
         Solr = utils.mle(Hnorm, znorm, sr)
         Solc = utils.mle(Hnorm, znorm, sc)
         Solf = utils.mle(Hnorm, znorm, sf)
 
-        print(f"Pc: {Solc[1]}")
-        print(f"{np.linalg.eigvals(Solc[1])}")
-
         # Create bounds objects
         ssbp = utils.SolutionSeparationBoundsParams(H=Hnorm, z=znorm, Solr=Solr, Solc=Solc, Solf=Solf, sr=sr, sc=sc, sf=sf)
         ssb = utils.SolutionSeparationBounds(ssbp)
 
-        sk = utils.create_subset_mask([1,2,3,4], N)
-        ss_lb, ss_ub = ssb.calcBounds(sk, 1)
+        items = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        all_combos = []
 
-        # Calc truth
-        xk, Pk, Ik = utils.mle(Hnorm, znorm, sk)
-        print(f"Pk: {Pk}")
-        print(f"{np.linalg.eigvals(Pk)}")
-        _,stat = NT.test(xk, Solr[0], Pk, Solr[1])
+        # Loop from length 1 up to the total length of the list
+        for r in range(1, len(items) + 1):
+            all_combos.extend(combinations(items, r))
 
-        print(f"ssb: {ss_lb} < {stat} < {ss_ub}")
-        assert ss_lb < stat
-        assert ss_ub > stat
+        
+        for combo in all_combos:
+            sk = utils.create_subset_mask([1] + list(combo), N)
+            ss_lb, ss_ub = ssb.calcBounds(sk, verbose=True)
 
-        # xr = Solr[0]
-        # Dinv = np.diag([1e-8, 1, 1e-8])
-        # Dsqrt = np.sqrt(np.linalg.inv(Dinv))
-        # Dinvsqrt = np.sqrt(Dinv)
-        # norm = np.linalg.norm(Dinvsqrt @ (xk - xr))**2
-        # Bk = utils.create_B_from_subset(sk)
-        # Hk = Bk.T @ Hnorm
-        # zk = Bk.T @ znorm
+            # Calc truth
+            xk, Pk, Ik = utils.mle(Hnorm, znorm, sk)
+            _,stat = NT.test(xk, Solr[0], Pk, Solr[1])
+            # print(f"stat threshold: {NT.T}")
 
-        # dp = np.linalg.norm(Dinvsqrt @ Hk.T @ (zk - Hk @ xr))**2
-        # QI = Dinvsqrt @ Hk.T @ Hk @ Dsqrt
-        # lb = dp / np.linalg.norm(QI, ord=2)**2
-        # Q = Dinvsqrt @ np.linalg.inv(Hk.T @ Hk) @ Dsqrt
-        # ub = dp * np.linalg.norm(Q, ord=2)**2
-        # print(np.trace(Q))
-        # print(np.trace(Q.T @ Q))
-        # print(np.linalg.eigvals(Q.T @ Q))
-        # print(f"{lb} < {norm} < {ub}")
-        # assert lb < norm
-        # assert ub > norm
+            # print(f"ssb: {ss_lb} < {ss_ub}")
 
-    # print(utils.calc_ss_statistic_baseline(s1, s2, Hnorm, znorm, NT))
-    # print(utils.calc_ss_statistic_ours(s1, s2, Hnorm, znorm, NT))
+            # if NT.T < ss_lb:
+            #     print("here")
+            #     break
+            # if NT.T < ss_ub:
+            #     xk, Pk, Ik = utils.mle(Hnorm, znorm, sk)
+            #     result, stat = NT.test(xk, Solr[0], Pk, Solr[1])
+            #     if not result:
+            #         break
+            
+            assert ss_ub > stat
+            assert ss_lb < stat
+            
+        
+        print(len(all_combos))
+    end_time = time.perf_counter()
+    print(f"Execution time: {end_time - start_time}")

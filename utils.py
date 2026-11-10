@@ -25,14 +25,14 @@ class NormalThreshold:
         self.dof = dof
         self.T = stats.chi2.ppf(1 - creq, dof) # ppf is the inverse cdf
 
-    def test(self, xk: np.ndarray, xr: np.ndarray, Pk: np.ndarray, Pr: np.ndarray) -> Stat:
+    def test(self, xk: np.ndarray, xr: np.ndarray, Pk: np.ndarray, Pr: np.ndarray, lmbda: float = 1.0) -> Stat:
         """
         Calculate SS statistic where xk has less measurements than xr
         """
-        assert self.dof == xk.shape[0], "dof must equal the number of state dimensions!"
+        m = xk.shape[0]
+        assert self.dof == m, "dof must equal the number of state dimensions!"
         xdelta = xr - xk
-        Pdeltainv = np.linalg.inv(Pk - Pr)
-        print(f"Pdeltainv = {Pdeltainv}")
+        Pdeltainv = np.linalg.inv(Pk - Pr + lmbda * np.eye(m))
 
         test_stat = (xdelta.T @ Pdeltainv @ xdelta)
         return (test_stat < self.T, test_stat)
@@ -58,9 +58,15 @@ def create_B_from_subset(s: Subset) -> np.ndarray:
                 break
     return B
 
+def sym_sqrt(A: np.ndarray) -> np.ndarray:
+    eigvals, Q = np.linalg.eig(A)
+    Lambda = np.diag(eigvals)
+    return Q @ np.sqrt(Lambda) @ Q.T
 
 class SolutionSeparationBoundsParams(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    lmbda: float = 1.0
+    blanch: bool = False
     H: np.ndarray
     z: np.ndarray
     Solr: Solution
@@ -76,66 +82,63 @@ class SolutionSeparationBounds:
     def __init__(self, params: SolutionSeparationBoundsParams):
         self.__params = params
         assert bounded_subset(self.__params.sf, self.__params.sc, self.__params.sr), "Ceiling subset (sc) is not bounded by Floor subset (sf) and Roof subset (sr)!"
-        
-        self.__trIc2 = np.max(np.linalg.eigvals(self.__params.Solc[2]))**2 # np.trace(self.__params.Solc[2])**2
-        self.__Pc = self.__params.Solc[1]
-        Bc = create_B_from_subset(self.__params.sc)
-        self.__Hc = Bc.T @ self.__params.H
 
-        self.__Pf = self.__params.Solf[1]
-        self.__trPf2 = np.max(np.linalg.eigvals(self.__params.Solf[1]))**2 #  np.trace(self.__params.Solf[1])**2
-        Bf = create_B_from_subset(self.__params.sf)
-        self.__Hf = Bf.T @ self.__params.H
+        # Get upperbound for the spectral norm of Hc.T @ Hc
+        # self.__ubIcnorm2 = np.max(np.linalg.eigvals(self.__params.Solc[2]))**2 # np.trace(self.__params.Solc[2])**2
+        self.__ubIcnorm2 = np.min(np.linalg.eigvals(self.__params.Solc[1]))**2
+        print(self.__ubIcnorm2)
+
+        # Get upperbound for the spectral norm of Pf = (Hf.T @ Hf)^{-1}
+        self.__ubPfnorm2 = np.max(np.linalg.eigvals(self.__params.Solf[1]))**2 #  np.trace(self.__params.Solf[1])**2
 
         self.__Pr = self.__params.Solr[1]
+        m = self.__params.H.shape[1]
 
-        print(f"Eigvals of Pf - Pr: {np.linalg.eigvals(self.__Pf - self.__Pr)}")
-        eigvals, Q = np.linalg.eig(self.__Pf - self.__Pr)
-        Lambda = np.diag(eigvals)
-        self.__trsqrtPfPr2 = np.max(np.linalg.eigvals(Q @ np.sqrt(Lambda) @ Q.T))**2 # np.trace(Q @ np.sqrt(Lambda) @ Q.T)**2
+        # Calculate upperbound for the spectral norm of the square root of Pf - Pr + Lambda, which is PSD wrt Pk - Pr + Lambda
+        self.__Pf = self.__params.Solf[1]
+        Pdeltaf = self.__Pf - self.__Pr + self.__params.lmbda * np.eye(m)
+        Pdeltaf_eigvals = np.linalg.eigvals(np.linalg.inv(Pdeltaf))
+        self.__ubsqrtPfPrnorm2 = np.min(Pdeltaf_eigvals) # np.trace(Q @ np.sqrt(Lambda) @ Q.T)**2 # 
 
-        eigvals, Q = np.linalg.eig(np.linalg.inv(self.__Pc - self.__Pr))
-        Lambda = np.diag(eigvals)
-        self.__trinvsqrtPcPr2 = np.max(np.linalg.eigvals(Q @ np.sqrt(Lambda) @ Q.T))**2 # np.trace(Q @ np.sqrt(Lambda) @ Q.T)**2
-        print(f"Pc - Pr = {self.__Pc - self.__Pr}")
-        print(f"Eigvals of Pc - Pr: {np.linalg.eigvals(self.__Pc - self.__Pr)}")
-        print(f"inv(Pc - Pr) = {np.linalg.inv(self.__Pc - self.__Pr)}")
+        # Calculate upperbound for the spectral norm of the square root of Pc - Pr + Lambda, which is negative semi-definite wrt Pk - Pr + Lambda
+        self.__Pc = self.__params.Solc[1]
+        Pdeltac = self.__Pc - self.__Pr + self.__params.lmbda * np.eye(m)
+        invPdeltac_eigvals = np.linalg.eigvals(np.linalg.inv(Pdeltac))
+        self.__ubinvsqrtPcPrnorm2 = np.max(invPdeltac_eigvals) # np.trace(Q @ np.sqrt(Lambda) @ Q.T)**2 #
 
-        Br = create_B_from_subset(self.__params.sr)
-        self.__Hr = Br.T @ self.__params.H
         self.__xr = self.__params.Solr[0]
         self.__yr = self.__params.z - self.__params.H @ self.__xr
+
+        print(np.max(np.linalg.eigvals(self.__Pf - self.__Pr)))
+
+        # Blanch upperbounds the solution separation using the SS covariance. We do it slightly differently using an indirect
+        # derivation of the SS statistic.
+        self.__ub_blanch = self.__ubinvsqrtPcPrnorm2 * np.linalg.norm(self.__yr)**2 * np.max(np.linalg.eigvals(self.__Pf - self.__Pr))
+        self.__lb = self.__ubsqrtPfPrnorm2 * np.linalg.norm(self.__yr)**2 * np.min(np.linalg.eigvals(self.__Pc - self.__Pr))
         
 
-    def calcBounds(self, sk: Subset, index: int) -> Tuple[float, float]:
+    def calcBounds(self, sk: Subset, verbose: bool = False) -> Tuple[float, float]:
         """
         Calculates bounds for the statistic: (xk - xr)^2 / (sigma2k - sigma2r)
         """
         assert bounded_subset(self.__params.sf, sk, self.__params.sc), "Current subset (sk) is not bounded by Floor subset (sf) and Ceiling subset (sc)"
-        assert index >= 0 and index < self.__xr.shape[0], "Index must be a valid state index!"
 
-        dp = ((self.__params.H.T * sk)[[index], :] @ (self.__yr.T * sk).T)**2
+        dp = ((self.__params.H.T * sk) @ (self.__yr.T * sk).T) # Hk.T @ Bk.T @ (self.__yr)
+        dpnorm2 = dp.T @ dp
 
-        alpha = np.zeros((3, 1))
-        alpha[index, 0] = 1
-        Bk = create_B_from_subset(sk)
-        Hk = Bk.T @ self.__params.H
-        dp = Hk.T @ Bk.T @ (self.__yr)
-        Pk = np.linalg.inv(Hk.T @ Hk)
-        
-        sigma2f = self.__Pf[index, index]
-        sigma2r = self.__Pr[index, index]
-        sigma2c = self.__Pc[index, index]
+        if verbose:
+            print(f"dpnorm2 = {dpnorm2}")
+            print(dpnorm2 * self.__ubPfnorm2)
+            print(np.max(np.linalg.eigvals(self.__Pf - self.__Pr)) * np.linalg.norm(self.__yr)**2)
+            print(f"||sqrt(Pf - Pr)||_2^2 = {self.__ubsqrtPfPrnorm2}")
+            print(f"||sqrt(inv(Pc - Pr))||_2^2 = {self.__ubinvsqrtPcPrnorm2}")
+            print(f"||Hc^T Hc||_2^2 = {self.__ubIcnorm2}")
 
-        # lb = dp / (self.__trIc * (sigma2f - sigma2r))
-        # ub = self.__trPf * dp / (sigma2c - sigma2r) 
-        # lb = np.linalg.norm(alpha.T @ self.__Pc @ dp)**2 / (sigma2f - sigma2r)
-        # ub = np.linalg.norm(alpha.T @ Pk @ dp)**2 / (sigma2c - sigma2r)
-        print(f"dp = {np.linalg.norm(dp)**2}")
-        print(f"self.__trsqrtPfPr2 = {self.__trsqrtPfPr2}")
-        print(f"self.__trinvsqrtPcPr2 = {self.__trinvsqrtPcPr2}")
-        lb = np.linalg.norm(dp)**2 / (self.__trsqrtPfPr2 * self.__trIc2)
-        ub = np.linalg.norm(dp)**2 * self.__trinvsqrtPcPr2 * self.__trPf2
+        lb = dpnorm2 * self.__ubsqrtPfPrnorm2 * self.__ubIcnorm2
+        if self.__params.blanch:
+            ub = self.__ub_blanch
+        else:
+            ub = dpnorm2 * self.__ubinvsqrtPcPrnorm2 * self.__ubPfnorm2
         return lb, ub
 
 
