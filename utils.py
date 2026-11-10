@@ -1,12 +1,12 @@
 import numpy as np
 from scipy import stats
-from ssfde import Subset
+from ssfde import Subset, Stat
 from pydantic import BaseModel, ConfigDict
 from typing import Dict, Tuple, Union, List
 
 Solution = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
-Stat = Tuple[bool, float]
+
 SOLUTION_HASH_MAP : Dict[Tuple[bool, ...], Solution] = {}
 
 
