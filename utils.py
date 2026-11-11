@@ -1,10 +1,8 @@
 import numpy as np
 from scipy import stats
-from ssfde import Subset, Stat
+from ssfde import Subset, Stat, create_B_from_subset, Solution, ITest, NormalThreshold, mle, chi2stat
 from pydantic import BaseModel, ConfigDict
 from typing import Dict, Tuple, Union, List
-
-Solution = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 SOLUTION_HASH_MAP : Dict[Tuple[bool, ...], Solution] = {}
@@ -14,54 +12,52 @@ SOLUTION_HASH_MAP : Dict[Tuple[bool, ...], Solution] = {}
 Y = 1
 
 
-class NormalThreshold:
-
-    def __init__(self, creq: float, dof: int = 1):
-        """
-        Calculate normalized SS statistic threshold (|x1 - x2|/sigma2) using continuity requirement, i.e. probability of false alarms:
-        (1 - probthresh) = creq
-        """
-        assert dof > 0, "ChiSquare degrees of freedom (dof) must be an integer 1 or greater!"
-        self.dof = dof
-        self.T = stats.chi2.ppf(1 - creq, dof) # ppf is the inverse cdf
-
-    def test(self, xk: np.ndarray, xr: np.ndarray, Pk: np.ndarray, Pr: np.ndarray, lmbda: float = 1.0) -> Stat:
-        """
-        Calculate SS statistic where xk has less measurements than xr
-        """
-        m = xk.shape[0]
-        assert self.dof == m, "dof must equal the number of state dimensions!"
-        xdelta = xr - xk
-        Pdeltainv = np.linalg.inv(Pk - Pr + lmbda * np.eye(m))
-
-        test_stat = (xdelta.T @ Pdeltainv @ xdelta)
-        return (test_stat < self.T, test_stat)
-
-
 def bounded_subset(sf: Subset, sk: Subset, sc: Subset) -> bool:
     """
     Check if sk is bounded by sf (s "floor") and sc (s "ceiling")
     """
     return np.array_equal(sf, sf * sk) and np.array_equal(sk, sk * sc)
 
-def create_B_from_subset(s: Subset) -> np.ndarray:
-    n_subset = int(np.sum(s)) # Number of measurements in the subset
-    n = s.shape[0] # Total number of measurements
-    B = np.zeros((n, n_subset))
-
-    k = 0
-    for i in range(n_subset):
-        for j in range(k, n):
-            if s[j]:
-                B[j, i] = 1.0
-                k = j + 1
-                break
-    return B
-
 def sym_sqrt(A: np.ndarray) -> np.ndarray:
     eigvals, Q = np.linalg.eig(A)
     Lambda = np.diag(eigvals)
     return Q @ np.sqrt(Lambda) @ Q.T
+
+def fault_generator(N: int, Nf: Union[int, Tuple], Nmin, bias: Tuple) -> Tuple[np.ndarray, np.ndarray]:
+    if isinstance(Nf, int):
+        assert Nf < N, f"Number of faults {Nf} must be less than number of measurements {N}!"
+        assert N - Nf >= Nmin, f"Number of fault-free measurements {N - Nf} must be greater than {Nmin}"
+    else:
+        Nf = np.random.randint(Nf[0], Nf[1]+1)
+        assert Nf < N, f"Number of faults {Nf} must be less than number of measurements {N}!"
+        assert N - Nf >= Nmin, f"Number of fault-free measurements {N - Nf} must be greater than {Nmin}"
+    fault_indices = np.random.choice(N, Nf, replace=False)
+    fault = np.zeros((N, 1))
+    for i in fault_indices:
+        fault[i, 0] = (bias[1] - bias[0]) * np.random.rand() + bias[0]
+    print(fault)
+    return fault, fault_indices
+
+def random_measurement_model_with_faults(N: int, Nf: Union[int, Tuple], M: int, bias: Tuple):
+    assert N >= M, "Must have more measurements than states!"
+    # Create noise covariance matrix
+    A = np.random.randn(N, N)
+    R = A.T @ A
+    L = np.linalg.cholesky(R)
+    Linv = np.linalg.inv(L)
+
+    # Create random faults
+    f, f_indices = fault_generator(N, Nf, M, bias)
+
+    # Generate a random measurement
+    H = np.random.randn(N, M)
+    x_gt = np.random.randn(M, 1)
+    z = H @ x_gt + L @ np.random.randn(N,1) + L @ f
+
+    # Normalize measurement model
+    Hnorm = Linv @ H
+    znorm = Linv @ z
+    return Hnorm, znorm, x_gt, f_indices
 
 class SolutionSeparationBoundsParams(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -113,7 +109,7 @@ class SolutionSeparationBounds:
 
         # Blanch upperbounds the solution separation using the SS covariance. We do it slightly differently using an indirect
         # derivation of the SS statistic.
-        self.__ub_blanch = self.__ubinvsqrtPcPrnorm2 * np.linalg.norm(self.__yr)**2 * np.max(np.linalg.eigvals(self.__Pf - self.__Pr))
+        self.__ub_blanch = np.linalg.norm(self.__yr)**2  # * np.max(np.linalg.eigvals(self.__Pf - self.__Pr)) * self.__ubinvsqrtPcPrnorm2
         self.__lb = self.__ubsqrtPfPrnorm2 * np.linalg.norm(self.__yr)**2 * np.min(np.linalg.eigvals(self.__Pc - self.__Pr))
         
 
@@ -134,25 +130,78 @@ class SolutionSeparationBounds:
             print(f"||sqrt(inv(Pc - Pr))||_2^2 = {self.__ubinvsqrtPcPrnorm2}")
             print(f"||Hc^T Hc||_2^2 = {self.__ubIcnorm2}")
 
-        lb = dpnorm2 * self.__ubsqrtPfPrnorm2 * self.__ubIcnorm2
+        # lb = dpnorm2 * self.__ubsqrtPfPrnorm2 * self.__ubIcnorm2
+        lb = dpnorm2 * self.__ubIcnorm2**(1/2)
         if self.__params.blanch:
             ub = self.__ub_blanch
         else:
             ub = dpnorm2 * self.__ubinvsqrtPcPrnorm2 * self.__ubPfnorm2
+            # ub = dpnorm2 * self.__ubPfnorm2
         return lb, ub
 
 
-def mle(H: np.ndarray, z: np.ndarray, sk: Subset) -> Solution:
-    """
-    Calculate MLE estimate with measurement model z = Hx + w where w is unit-normal, white noise
-    """
-    Bk = create_B_from_subset(sk)
-    Hk = Bk.T @ H
-    zk = Bk.T @ z
-    FI = Hk.T @ Hk # Fisher Information
-    x = np.linalg.solve(FI, Hk.T @ zk)
-    P = np.linalg.inv(FI)
-    return x, P, FI
+class BaselineTest(ITest):
+
+    def __init__(self, H: np.ndarray, z: np.ndarray, NT: NormalThreshold, initial_subset: Subset):
+        super().__init__(H, z, NT, initial_subset)
+
+    def _eval(self, H: np.ndarray, z: np.ndarray, subset: Subset, NT: NormalThreshold, solr: Solution) -> Stat:
+        try:
+            xk, Pk,_ = SOLUTION_HASH_MAP[tuple(subset)]
+        except KeyError:
+            xk, Pk, FIk = mle(H, z, subset)
+            SOLUTION_HASH_MAP[tuple(subset)] = (xk, Pk, FIk)
+
+        return NT.test(xk, solr[0], Pk, solr[1], lmbda=1e-8)
+
+class BlanchTest(ITest):
+
+    def __init__(self, H: np.ndarray, z: np.ndarray, NT: NormalThreshold, initial_subset: Subset):
+        super().__init__(H, z, NT, initial_subset)
+        self.__ub = chi2stat(H, z, initial_subset)
+
+    def _eval(self, H: np.ndarray, z: np.ndarray, subset: Subset, NT: NormalThreshold, solr: Solution) -> Stat:
+
+        if self.__ub < NT.T:
+            return (True, self.__ub)
+        
+        try:
+            xk, Pk,_ = SOLUTION_HASH_MAP[tuple(subset)]
+        except KeyError:
+            xk, Pk, FIk = mle(H, z, subset)
+            SOLUTION_HASH_MAP[tuple(subset)] = (xk, Pk, FIk)
+
+        return NT.test(xk, solr[0], Pk, solr[1], lmbda=1e-8)
+
+class OurTest(ITest):
+
+    def __init__(self, H: np.ndarray, z: np.ndarray, NT: NormalThreshold, initial_subset: Subset):
+        super().__init__(H, z, NT, initial_subset)
+        self.__ub = chi2stat(H, z, initial_subset)
+
+        sol = mle(H, z, initial_subset)
+        self.__minPceig = np.min(np.linalg.eigvals(sol[1]))
+        self.__yr = z - H @ sol[0]
+
+    def _eval(self, H: np.ndarray, z: np.ndarray, subset: Subset, NT: NormalThreshold, solr: Solution) -> Stat:
+
+        if self.__ub < NT.T:
+            return (True, self.__ub)
+
+        dp = ((H.T * subset) @ (self.__yr.T * subset).T) # Hk.T @ Bk.T @ (self.__yr)
+        dpnorm2 = dp.T @ dp
+        lb = dpnorm2 * self.__minPceig
+
+        if lb > NT.T:
+            return (False, lb)
+        
+        try:
+            xk, Pk,_ = SOLUTION_HASH_MAP[tuple(subset)]
+        except KeyError:
+            xk, Pk, FIk = mle(H, z, subset)
+            SOLUTION_HASH_MAP[tuple(subset)] = (xk, Pk, FIk)
+
+        return NT.test(xk, solr[0], Pk, solr[1], lmbda=1e-8)
 
 
 def calc_ss_statistic_baseline(s1: Subset, s2: Subset, H: np.ndarray, z: np.ndarray, NT: NormalThreshold) -> Stat:

@@ -13,7 +13,7 @@ def test_B_creation():
 def test_stats():
 
     start_time = time.perf_counter()
-    for i in range(1):
+    for i in range(50):
         N = 20 # Measurement dimension
         M = 3 # State dimension
         NT = utils.NormalThreshold(1e-9, dof=M)
@@ -47,7 +47,7 @@ def test_stats():
         Solf = utils.mle(Hnorm, znorm, sf)
 
         # Create bounds objects
-        ssbp = utils.SolutionSeparationBoundsParams(H=Hnorm, z=znorm, Solr=Solr, Solc=Solc, Solf=Solf, sr=sr, sc=sc, sf=sf)
+        ssbp = utils.SolutionSeparationBoundsParams(H=Hnorm, z=znorm, Solr=Solr, Solc=Solc, Solf=Solf, sr=sr, sc=sc, sf=sf, lmbda=1e-5, blanch=True)
         ssb = utils.SolutionSeparationBounds(ssbp)
 
         items = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
@@ -64,10 +64,10 @@ def test_stats():
 
             # Calc truth
             xk, Pk, Ik = utils.mle(Hnorm, znorm, sk)
-            _,stat = NT.test(xk, Solr[0], Pk, Solr[1])
+            _,stat = NT.test(xk, Solr[0], Pk, Solr[1], lmbda=1e-5)
             # print(f"stat threshold: {NT.T}")
 
-            # print(f"ssb: {ss_lb} < {ss_ub}")
+            print(f"ssb: {ss_lb} < {ss_ub}")
 
             # if NT.T < ss_lb:
             #     print("here")
