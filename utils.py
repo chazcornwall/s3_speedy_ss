@@ -3,6 +3,7 @@ from scipy import stats
 from ssfde import Subset, Stat, create_B_from_subset, Solution, ITest, NormalThreshold, mle, chi2stat
 from pydantic import BaseModel, ConfigDict
 from typing import Dict, Tuple, Union, List
+import time
 
 
 SOLUTION_HASH_MAP : Dict[Tuple[bool, ...], Solution] = {}
@@ -35,7 +36,6 @@ def fault_generator(N: int, Nf: Union[int, Tuple], Nmin, bias: Tuple) -> Tuple[n
     fault = np.zeros((N, 1))
     for i in fault_indices:
         fault[i, 0] = (bias[1] - bias[0]) * np.random.rand() + bias[0]
-    print(fault)
     return fault, fault_indices
 
 def random_measurement_model_with_faults(N: int, Nf: Union[int, Tuple], M: int, bias: Tuple):
@@ -58,6 +58,32 @@ def random_measurement_model_with_faults(N: int, Nf: Union[int, Tuple], M: int, 
     Hnorm = Linv @ H
     znorm = Linv @ z
     return Hnorm, znorm, x_gt, f_indices
+
+class RandomMeasurementModel:
+
+    def __init__(self, N: int, M: int, Nf: Union[int, Tuple], bias: Tuple):
+        assert N >= M, "Must have more measurements than states!"
+        # Create noise covariance matrix
+        self.N = N
+        self.M = M
+        A = np.random.randn(N, N)
+        R = A.T @ A
+        self.L = np.linalg.cholesky(R)
+        self.Linv = np.linalg.inv(self.L)
+
+        # Generate a random measurement
+        self.H = np.random.randn(N, M)
+        self.Hnorm = self.Linv @ self.H
+        self.x_gt = np.random.randn(M, 1)
+        self.f, self.f_indices = fault_generator(self.N, Nf, self.M, bias)
+
+    def sample(self):
+        # Create random faults
+        z = self.H @ self.x_gt + self.L @ np.random.randn(self.N,1) + self.L @ self.f
+
+        # Normalize measurement model
+        znorm = self.Linv @ z
+        return self.Hnorm, znorm, self.x_gt, self.f_indices
 
 class SolutionSeparationBoundsParams(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -146,128 +172,58 @@ class BaselineTest(ITest):
         super().__init__(H, z, NT, initial_subset)
 
     def _eval(self, H: np.ndarray, z: np.ndarray, subset: Subset, NT: NormalThreshold, solr: Solution) -> Stat:
-        try:
-            xk, Pk,_ = SOLUTION_HASH_MAP[tuple(subset)]
-        except KeyError:
-            xk, Pk, FIk = mle(H, z, subset)
-            SOLUTION_HASH_MAP[tuple(subset)] = (xk, Pk, FIk)
+        solk = self._getSolution(H, z, subset)
+        stat = NT.test(solk[0], solr[0], solk[1], solr[1], lmbda=1e-8)
+        return stat
 
-        return NT.test(xk, solr[0], Pk, solr[1], lmbda=1e-8)
+    def evalNoSubset(self) -> bool | None:
+        return super().evalNoSubset()
+
 
 class BlanchTest(ITest):
 
     def __init__(self, H: np.ndarray, z: np.ndarray, NT: NormalThreshold, initial_subset: Subset):
         super().__init__(H, z, NT, initial_subset)
-        self.__ub = chi2stat(H, z, initial_subset)
+        self.__yr = z - H @ self._solr[0]
+        self.__ub = (self.__yr.T * initial_subset) @ (self.__yr.T * initial_subset).T
+        self.__ub = self.__yr.T @ self.__yr
 
     def _eval(self, H: np.ndarray, z: np.ndarray, subset: Subset, NT: NormalThreshold, solr: Solution) -> Stat:
+        solk = self._getSolution(H, z, subset)
+        stat = NT.test(solk[0], solr[0], solk[1], solr[1], lmbda=1e-8)
+        return stat
 
-        if self.__ub < NT.T:
-            return (True, self.__ub)
-        
-        try:
-            xk, Pk,_ = SOLUTION_HASH_MAP[tuple(subset)]
-        except KeyError:
-            xk, Pk, FIk = mle(H, z, subset)
-            SOLUTION_HASH_MAP[tuple(subset)] = (xk, Pk, FIk)
+    def evalNoSubset(self) -> bool | None:
+        if self.__ub < self._NT.T:
+            return True
+        else:
+            return None
 
-        return NT.test(xk, solr[0], Pk, solr[1], lmbda=1e-8)
-
+    
 class OurTest(ITest):
 
     def __init__(self, H: np.ndarray, z: np.ndarray, NT: NormalThreshold, initial_subset: Subset):
         super().__init__(H, z, NT, initial_subset)
-        self.__ub = chi2stat(H, z, initial_subset)
-
-        sol = mle(H, z, initial_subset)
-        self.__minPceig = np.min(np.linalg.eigvals(sol[1]))
-        self.__yr = z - H @ sol[0]
+        self.__yr = z - H @ self._solr[0]
+        self.__ub = (self.__yr.T * initial_subset) @ (self.__yr.T * initial_subset).T
+        self.__minPceig = np.min(np.linalg.eigvals(self._solr[1])).real
 
     def _eval(self, H: np.ndarray, z: np.ndarray, subset: Subset, NT: NormalThreshold, solr: Solution) -> Stat:
-
-        if self.__ub < NT.T:
-            return (True, self.__ub)
-
         dp = ((H.T * subset) @ (self.__yr.T * subset).T) # Hk.T @ Bk.T @ (self.__yr)
-        dpnorm2 = dp.T @ dp
-        lb = dpnorm2 * self.__minPceig
+        lb = (dp.T @ dp * self.__minPceig)[0,0]
 
         if lb > NT.T:
             return (False, lb)
         
-        try:
-            xk, Pk,_ = SOLUTION_HASH_MAP[tuple(subset)]
-        except KeyError:
-            xk, Pk, FIk = mle(H, z, subset)
-            SOLUTION_HASH_MAP[tuple(subset)] = (xk, Pk, FIk)
+        solk = self._getSolution(H, z, subset)
+        stat = NT.test(solk[0], solr[0], solk[1], solr[1], lmbda=1e-8)
+        return stat
 
-        return NT.test(xk, solr[0], Pk, solr[1], lmbda=1e-8)
-
-
-def calc_ss_statistic_baseline(s1: Subset, s2: Subset, H: np.ndarray, z: np.ndarray, NT: NormalThreshold) -> Stat:
-
-    # Get solution for subset 1
-    try:
-        x1, P1 = SOLUTION_HASH_MAP[tuple(s1)]
-    except KeyError:
-        x1, P1 = mle(H[s1], z[s1])
-        SOLUTION_HASH_MAP[tuple(s1)] = (x1, P1)
-
-    # Get solution for subset 2
-    try:
-        x2, P2 = SOLUTION_HASH_MAP[tuple(s2)]
-    except KeyError:
-        x2, P2 = mle(H[s2], z[s2])
-        SOLUTION_HASH_MAP[tuple(s2)] = (x2, P2)
-
-    return NT.test(x1, x2, P1, P2)
-
-
-def calc_ss_statistic_ours(s1: Subset, s2: Subset, H: np.ndarray, z: np.ndarray, NT: NormalThreshold, alpha: float = 1e-8) -> Stat:
-    
-    # Get solution for subset 1
-    try:
-        x1, P1 = SOLUTION_HASH_MAP[tuple(s1)]
-    except KeyError:
-        x1, P1 = mle(H[s1], z[s1])
-        SOLUTION_HASH_MAP[tuple(s1)] = (x1, P1)
-
-    H2 = H[s2]
-    z2 = z[s2]
-    d = np.array([[alpha, 1.0, alpha]]).T # Diagonal weighting matrix
-    p = (H2.T * d) @ (z2 - H2 @ x1) # DH^T(z - Hx)
-
-    # Calculate eigenvalue upper and lower bounds using Gershgorin circles 
-    F = H2.T @ H2 # Fisher Information
-    R = np.sum(np.abs(F), axis=1) - np.diag(F)
-    eval_upper = np.max(np.diag(F) + R)
-    eval_lower = np.min(np.diag(F) - R)
-
-    print(f"F: {F}")
-    print(f"eigval upper: {eval_upper}")
-    print(f"eigval lower: {eval_lower}")
-
-    sigma2_ub = 1 / eval_lower - P1[Y, Y]
-    sigma2_lb = 1 / eval_upper - P1[Y, Y]
-
-    if 1 / eval_upper < 1 / eval_lower:
-        ss_ub = p[1,0] / (sigma2_lb * eval_lower)
-        ss_lb = p[1,0] / (sigma2_ub * eval_upper)
-
-        # If we can, early return using bounds!
-        if ss_ub < NT.T:
-            return ss_ub
-        if NT.T < ss_lb:
+    def evalNoSubset(self) -> bool | None:
+        if self.__ub < self._NT.T:
+            return True
+        else:
             return None
-
-    # Get solution for subset 2
-    try:
-        x2, P2 = SOLUTION_HASH_MAP[tuple(s2)]
-    except KeyError:
-        x2, P2 = mle(H[s2], z[s2])
-        SOLUTION_HASH_MAP[tuple(s2)] = (x2, P2)
-
-    return NT.test(x1, x2, P1, P2)
 
 
 def create_subset_mask(faults: List[int], N: int) -> Subset:

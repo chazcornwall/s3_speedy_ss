@@ -54,6 +54,17 @@ def mle(H: np.ndarray, z: np.ndarray, sk: Subset) -> Solution:
     return x, P, FI
 
 
+def ourheuristic(H: np.ndarray, z: np.ndarray, sr: Subset, sk: Subset) -> float:
+    xr,Pr,_ = mle(H, z, sr)
+    # Assume H and z have been normalized!
+    Bk = create_B_from_subset(sk)
+    Hk = Bk.T @ H
+    zk = Bk.T @ z
+    # print(f"our: {np.linalg.norm(Hk.T @ (zk - Hk @ xr))}")
+    lb = np.sqrt(np.min(np.linalg.eigvals(Pr)).real) * np.linalg.norm(Hk.T @ (zk - Hk @ xr))
+    return lb
+
+
 class NormalThreshold:
 
     def __init__(self, creq: float, dof: int = 1):
@@ -81,13 +92,25 @@ class NormalThreshold:
 class ITest(ABC):
 
     def __init__(self, H: np.ndarray, z: np.ndarray, NT: NormalThreshold, initial_subset: Subset):
-        self._solr = mle(H, z, initial_subset)
+        self.solution_hash_map : Dict[Tuple[bool, ...], Solution] = {}
+        self._solr = self._getSolution(H, z, initial_subset)
         self._H = H
         self._z = z
         self._NT = NT
 
+    def _getSolution(self, H: np.ndarray, z: np.ndarray, subset: Subset) -> Solution:
+        try:
+            sol = self.solution_hash_map[tuple(subset)]
+        except KeyError:
+            sol = mle(H, z, subset)
+            self.solution_hash_map[tuple(subset)] = sol
+        return sol
+
     def eval(self, subset: Subset) -> Stat:
         return self._eval(self._H, self._z, subset, self._NT, self._solr)
+
+    def evalNoSubset(self) -> Union[bool, None]:
+        return None
 
     @abstractmethod
     def _eval(self, H: np.ndarray, z: np.ndarray, subset: Subset, NT: NormalThreshold, solr: Solution) -> Stat:
@@ -100,6 +123,7 @@ class SSFDEParams(BaseModel):
     NT: NormalThreshold
     H: np.ndarray # Normalized measurement jacobian
     z: np.ndarray # Normalized measurement vector
+    heuristic: str = "num"
 
 
 class SSFDE:
@@ -119,8 +143,20 @@ class SSFDE:
     def __init__(self, params: SSFDEParams):
         self.__params = params
         self.__i = 0
+        self.__duration_s = 10
+        self.__duration_exceeded = False
 
-    def fde(self, N: int, Nmin: int, verbose: bool = False) -> FdeOutput:
+        if self.__params.heuristic == "chi2":
+            self.__heuristic = lambda H, z, init_subset, curr_subset: chi2stat(H, z, curr_subset) 
+        elif self.__params.heuristic == "num":
+            self.__heuristic = lambda H, z, init_subset, curr_subset: np.sum(curr_subset)
+        elif self.__params.heuristic == "ours":
+            self.__heuristic = lambda H, z, init_subset, curr_subset: ourheuristic(H, z, init_subset, curr_subset)
+        else:
+            self.__heuristic = lambda H, z, init_subset, curr_subset: np.sum(curr_subset)
+
+
+    def fde(self, N: int, Nmin: int, max_duration_s: float = 10, verbose: bool = False) -> FdeOutput:
         """
         Finds the largest, fault-free measurement subset.
 
@@ -139,7 +175,10 @@ class SSFDE:
         all_in_view_subset = np.array([True] * N)
         heapq.heappush(pq, (0, SSFDE.PqType(all_in_view_subset)))
 
-        start_s = time.perf_counter()
+        self.__start_s = time.perf_counter()
+        self.__duration_s = max_duration_s
+        self.__duration_exceeded = False
+        curr_best_subset = np.array([False] * N)
 
         # Try the all-in-view solution
         priority = self.eval_subset(all_in_view_subset, -1, Nmin, verbose=verbose)
@@ -156,23 +195,32 @@ class SSFDE:
                         new_subset = deepcopy(subset)
                         new_subset[i] = False
 
-                        # N > Nmin to perform SS test!
-                        if np.sum(new_subset) > Nmin:
+                        # Ensure N > Nmin and better than current solution before performing SS test!
+                        if max(Nmin, np.sum(curr_best_subset)) < np.sum(new_subset):
                             priority = self.eval_subset(new_subset, i, Nmin, verbose=verbose)
 
-                            # If subset is not valid, try a smaller subset! If the subset is good, we are done!
+                            # If subset is not valid, try a smaller subset!
                             if priority:
                                 heapq.heappush(pq, (priority, SSFDE.PqType(new_subset, i)))
                             else:
-                                # Since we are taking away measurements, the first subset that passes will be the largest!
-                                stop_s = time.perf_counter()
-                                return new_subset, mle(self.__params.H, self.__params.z, new_subset), stop_s - start_s
+                                # Only keep the best subset (more measurements)!
+                                if not self.__duration_exceeded:
+                                    curr_best_subset = new_subset
+                                    print(f"Found a better solution with {np.sum(curr_best_subset)} measurements!")
+                                else:
+                                    print(f"WARNING: Exceeded {self.__duration_s} s duration!")
+                                    pq = [] # empty the queue! we are finished
+                                    break
+
         else:
-            stop_s = time.perf_counter()
-            return all_in_view_subset, mle(self.__params.H, self.__params.z, all_in_view_subset), stop_s - start_s
+            curr_best_subset = all_in_view_subset
 
         stop_s = time.perf_counter()
-        return stop_s - start_s
+        if np.sum(curr_best_subset) < Nmin:
+            best_sol : Solution = (np.array([np.nan]), np.array([np.nan]), np.array([np.nan]))
+        else:
+            best_sol : Solution = mle(self.__params.H, self.__params.z, curr_best_subset)
+        return curr_best_subset, best_sol, stop_s - self.__start_s
 
     def eval_subset(self, subset: Subset, meas: int, Nmin: int, verbose: bool = True) -> Union[float, None]:
         """
@@ -192,10 +240,23 @@ class SSFDE:
         pq : List[Tuple[float, int, SSFDE.PqType]] = []
         heapq.heappush(pq, (0, SSFDE.PqType(subset)))
 
+        # Try to make a decision before going through all the options using bounds
+        quick_decision = test_stat.evalNoSubset() 
+        if quick_decision is not None:
+            if quick_decision:
+                return None
+            else:
+                return self.__heuristic(self.__params.H, self.__params.z, subset, subset)
+
         while pq:
             element : SSFDE.PqType = heapq.heappop(pq)[1]
             subset = element.curr_subset
             prev_meas = element.prev_meas
+
+            # Check for duration here because this is the highest frequency loop
+            self.__duration_exceeded = time.perf_counter() - self.__start_s > self.__duration_s
+            if self.__duration_exceeded:
+                return None
 
             # Expand each subset
             for i in range(prev_meas+1, len(subset)):
@@ -214,7 +275,7 @@ class SSFDE:
                         if passes:
                             heapq.heappush(pq, (1.0 / priority, SSFDE.PqType(new_subset, i)))
                         else:
-                            return chi2stat(self.__params.H, self.__params.z, subset)
+                            return self.__heuristic(self.__params.H, self.__params.z, subset, new_subset) # chi2stat(self.__params.H, self.__params.z, subset) 
         return None
 
                         
