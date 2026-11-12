@@ -1,8 +1,8 @@
 import numpy as np
 from scipy import stats
-from ssfde import Subset, Stat, create_B_from_subset, Solution, ITest, NormalThreshold, mle, chi2stat
+from ssfde import Subset, Stat, create_B_from_subset, Solution, ITest, NormalThreshold, mle, chi2stat, FdeOutput
 from pydantic import BaseModel, ConfigDict
-from typing import Dict, Tuple, Union, List
+from typing import Dict, Tuple, Union, List, Callable
 import time
 
 
@@ -67,8 +67,8 @@ class RandomMeasurementModel:
         self.N = N
         self.M = M
         A = np.random.randn(N, N)
-        R = A.T @ A
-        self.L = np.linalg.cholesky(R)
+        self.R = A.T @ A
+        self.L = np.linalg.cholesky(self.R)
         self.Linv = np.linalg.inv(self.L)
 
         # Generate a random measurement
@@ -231,3 +231,21 @@ def create_subset_mask(faults: List[int], N: int) -> Subset:
     for fault in faults:
         all_in_view_subset[fault] = False
     return all_in_view_subset
+
+
+def get_output(query_elapsed_time_s: float, output: List[FdeOutput]) -> FdeOutput:
+    curr_output = None
+    for i in range(len(output)):
+        if i == 0:
+            assert query_elapsed_time_s >= output[i][2], f"Query time {query_elapsed_time_s} occurs before any data!"
+        
+        if i < len(output) - 1:
+            if output[i][2] <= query_elapsed_time_s and query_elapsed_time_s < output[i+1][2]:
+                curr_output = output[i]
+                break
+        else:
+            curr_output = output[i]
+            break
+    return curr_output
+
+    

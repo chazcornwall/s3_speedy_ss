@@ -65,6 +65,10 @@ def ourheuristic(H: np.ndarray, z: np.ndarray, sr: Subset, sk: Subset) -> float:
     return lb
 
 
+def constheuristic(H: np.ndarray, z: np.ndarray, sr: Subset, sk: Subset) -> float:
+    return 1.0
+
+
 class NormalThreshold:
 
     def __init__(self, creq: float, dof: int = 1):
@@ -152,11 +156,13 @@ class SSFDE:
             self.__heuristic = lambda H, z, init_subset, curr_subset: np.sum(curr_subset)
         elif self.__params.heuristic == "ours":
             self.__heuristic = lambda H, z, init_subset, curr_subset: ourheuristic(H, z, init_subset, curr_subset)
+        elif self.__params.heuristic == "const":
+            self.__heuristic = lambda H, z, init_subset, curr_subset: constheuristic(H, z, init_subset, curr_subset)
         else:
             self.__heuristic = lambda H, z, init_subset, curr_subset: np.sum(curr_subset)
 
 
-    def fde(self, N: int, Nmin: int, max_duration_s: float = 10, verbose: bool = False) -> FdeOutput:
+    def fde(self, N: int, Nmin: int, max_duration_s: float = 10, verbose: bool = False) -> List[FdeOutput]:
         """
         Finds the largest, fault-free measurement subset.
 
@@ -174,6 +180,12 @@ class SSFDE:
         pq : List[Tuple[float, SSFDE.PqType]] = []
         all_in_view_subset = np.array([True] * N)
         heapq.heappush(pq, (0, SSFDE.PqType(all_in_view_subset)))
+
+        output : List[FdeOutput] = [] # Store all solutions up to the max duration
+
+        # Add default solution
+        best_sol : Solution = mle(self.__params.H, self.__params.z, all_in_view_subset)
+        output.append((all_in_view_subset, best_sol, 0.0))
 
         self.__start_s = time.perf_counter()
         self.__duration_s = max_duration_s
@@ -206,21 +218,21 @@ class SSFDE:
                                 # Only keep the best subset (more measurements)!
                                 if not self.__duration_exceeded:
                                     curr_best_subset = new_subset
+                                    stop_s = time.perf_counter()
+                                    output.append((curr_best_subset, mle(self.__params.H, self.__params.z, curr_best_subset), stop_s - self.__start_s))
                                     print(f"Found a better solution with {np.sum(curr_best_subset)} measurements!")
                                 else:
                                     print(f"WARNING: Exceeded {self.__duration_s} s duration!")
                                     pq = [] # empty the queue! we are finished
                                     break
-
         else:
             curr_best_subset = all_in_view_subset
 
         stop_s = time.perf_counter()
-        if np.sum(curr_best_subset) < Nmin:
-            best_sol : Solution = (np.array([np.nan]), np.array([np.nan]), np.array([np.nan]))
-        else:
+        if np.sum(curr_best_subset) > Nmin: # Found solution that is not the trivial all_in_view solution
             best_sol : Solution = mle(self.__params.H, self.__params.z, curr_best_subset)
-        return curr_best_subset, best_sol, stop_s - self.__start_s
+            output.append((curr_best_subset, best_sol, stop_s - self.__start_s))
+        return output
 
     def eval_subset(self, subset: Subset, meas: int, Nmin: int, verbose: bool = True) -> Union[float, None]:
         """
@@ -258,7 +270,7 @@ class SSFDE:
             if self.__duration_exceeded:
                 return None
 
-            # Expand each subset
+            # Expand each subset to consider all possible combinations
             for i in range(prev_meas+1, len(subset)):
                 if subset[i]:
                     new_subset = deepcopy(subset)
