@@ -72,7 +72,7 @@ def test_ssfde_ours():
                 assert output[0][i]
 
 def test_ssfde_all():
-    METHODS = ["Baseline", "Chi2", "Ours", "Omnicient"]
+    METHODS = ["Baseline", "Chi2", "Ours", "Omniscient"]
 
     now = datetime.now()
     filestamp = now.strftime("%Y%m%d_%H%M%S")

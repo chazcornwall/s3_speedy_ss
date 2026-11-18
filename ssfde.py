@@ -161,7 +161,6 @@ class SSFDE:
         else:
             self.__heuristic = lambda H, z, init_subset, curr_subset: np.sum(curr_subset)
 
-
     def fde(self, N: int, Nmin: int, max_duration_s: float = 10, verbose: bool = False) -> List[FdeOutput]:
         """
         Finds the largest, fault-free measurement subset.
@@ -287,7 +286,7 @@ class SSFDE:
                         if passes:
                             heapq.heappush(pq, (1.0 / priority, SSFDE.PqType(new_subset, i)))
                         else:
-                            return self.__heuristic(self.__params.H, self.__params.z, subset, new_subset) # chi2stat(self.__params.H, self.__params.z, subset) 
+                            return self.__heuristic(self.__params.H, self.__params.z, subset, new_subset)
         return None
 
                         
