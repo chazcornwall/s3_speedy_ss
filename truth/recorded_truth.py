@@ -7,11 +7,11 @@ from truth.i_truth import ITruth, TruthType
 class RecordedTruth(ITruth):
 
     def __init__(self, truth_file: str):
-        super().__init__()
         """
         Store true position of ego object
         """
         self.__truth_file = truth_file
+        super().__init__()
 
     def _create_dict(self) -> Dict[float, TruthType]:
         dict : Dict[float, np.ndarray] = {}
@@ -28,6 +28,4 @@ class RecordedTruth(ITruth):
                     except:
                         print("Skipping line due to invalid number format: %s", line.strip())
                         continue
-                else:
-                    print("Invalid line in truth file: %s", line.strip())
         return dict

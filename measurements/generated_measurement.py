@@ -1,6 +1,6 @@
 import numpy as np
 import pickle
-from pydantic import BaseClass
+from pydantic import BaseModel
 from typing import Dict, List
 from abc import ABC, abstractmethod
 
@@ -9,7 +9,7 @@ from measurements.recorded_measurement import RecordedMeasurement
 from truth.recorded_truth import ITruth
 
 
-class GeneratedMeasurementParams(BaseClass):
+class GeneratedMeasurementParams(BaseModel):
     stddev: float
     fault_prob: float
     fault_magnitude: float
@@ -18,10 +18,10 @@ class GeneratedMeasurementParams(BaseClass):
 class GeneratedMeasurement(IMeasurement):
 
     def __init__(self, truth: ITruth, recorded_measurement: RecordedMeasurement, params: GeneratedMeasurementParams):
-        super().__init__()
         self.__params = params
         self.__truth = truth
         self.__rm = recorded_measurement
+        super().__init__()
 
     def _create_dict(self) -> Dict[float, List[MeasType]]:
         dict : Dict[float, List[MeasType]] = {}
@@ -34,7 +34,7 @@ class GeneratedMeasurement(IMeasurement):
                     dict[tt] = []
                     for meas in self.__rm.getMeas(rmt):
                         sat_pos = meas[1]
-                        pseudorange_mean = np.linalg.norm(self.__truth.getTruth(tt) - sat_pos)
+                        pseudorange_mean = meas[0]
 
                         # Inject faults according to fault probability
                         if np.random.rand() < self.__params.fault_prob:

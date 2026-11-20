@@ -8,8 +8,8 @@ from measurements.i_measurement import IMeasurement, MeasType
 class RecordedMeasurement(IMeasurement):
 
     def __init__(self, meas_file: str):
-        super().__init__()
         self.__meas_file = meas_file
+        super().__init__()
 
     def _create_dict(self) -> Dict[float, List[Tuple[float, np.ndarray]]]:
         dict : Dict[float, List[MeasType]] = {}
@@ -29,7 +29,5 @@ class RecordedMeasurement(IMeasurement):
                     except:
                         print("Error parsing pseudorange line")
                         continue
-                else:
-                    print("Invalid line in measurement file: %s", line.strip())
         return dict
 

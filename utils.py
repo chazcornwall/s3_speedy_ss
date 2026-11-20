@@ -93,7 +93,8 @@ class BaselineTest(ITest):
 
     def _eval(self, H: np.ndarray, z: np.ndarray, subset: Subset, NT: NormalThreshold, solr: Solution) -> Stat:
         solk = self._getSolution(H, z, subset)
-        stat = NT.test(solk[0], solr[0], solk[1], solr[1], lmbda=1e-8)
+        # Ignore bias term in SS statistic!
+        stat = NT.test(solk[0][0:3,:], solr[0][0:3,:], solk[1][0:3,0:3], solr[1][0:3,0:3], lmbda=1e-5)
         return stat
 
     def evalNoSubset(self) -> bool | None:
