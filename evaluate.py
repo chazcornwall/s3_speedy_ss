@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 from truth.i_truth import ITruth, TruthType
 from measurements.i_measurement import IMeasurement, MeasType
@@ -26,6 +26,11 @@ def create_measurement_model(x0: np.ndarray, measurements: List[MeasType]) -> Tu
 
 def evaluate(truth: ITruth, meas: IMeasurement, ssfdes: List[SSFDE]):
 
+    # Use RMSE error! (ATE of position): https://rpg.ifi.uzh.ch/docs/IROS18_Zhang.pdf
+    error : Dict[int, List] = {}
+    for key in range(len(ssfdes)):
+        error[key] = []
+
     first = True
     x0 = np.zeros((3, 1))
     for tt in truth.getTimes():
@@ -36,4 +41,17 @@ def evaluate(truth: ITruth, meas: IMeasurement, ssfdes: List[SSFDE]):
                     first = False
                 else:
                     z, H = create_measurement_model(x0, meas.getMeas(tt))
-                    # TODO: Initialize SSFDEs here for evaluation!
+                    for i, ssfde in enumerate(ssfdes):
+                        outputs = ssfde.fde(z.shape[0], 4, max_duration_s=1.0)
+                        output = outputs[-1] # Get last output (the best solution)
+                        xhat, Phat, Ihat = output[1]
+                        x0 = truth.getTruth(tt)
+                        error[i].append((xhat - x0).T @ (xhat - x0))
+
+    # Print RMSE error after SSFDE
+    for key in range(len(ssfdes)):
+        sum = 0
+        for err in error[key]:
+            sum += err
+        rmse = np.sqrt(sum / len(error[key]))
+        print(f"RMSE for SSFDE {key}: {rmse}")
