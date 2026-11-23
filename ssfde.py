@@ -228,6 +228,8 @@ class SSFDE:
             curr_best_subset = all_in_view_subset
 
         stop_s = time.perf_counter()
+        if not self.__duration_exceeded:
+            print(f"Optimal solution found in {(stop_s - self.__start_s):0.3} s!")
         if np.sum(curr_best_subset) > Nmin: # Found solution that is not the trivial all_in_view solution
             best_sol : Solution = mle(self.__params.H, self.__params.z, curr_best_subset)
             output.append((curr_best_subset, best_sol, stop_s - self.__start_s))

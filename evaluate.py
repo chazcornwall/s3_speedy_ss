@@ -1,9 +1,12 @@
 import numpy as np
+import matplotlib.pyplot as plt
+from datetime import datetime
 from typing import List, Tuple, Dict, Callable
 
 from truth.i_truth import ITruth, TruthType
 from measurements.i_measurement import IMeasurement, MeasType
 from ssfde import SSFDE, SSFDEParams
+from utils import get_output
 
 
 def create_measurement_model(x0: np.ndarray, bias: float, measurements: List[MeasType]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -36,13 +39,19 @@ def evaluate(truth: ITruth, meas: IMeasurement, ssfdes: List[Callable[[np.ndarra
     for key in range(len(ssfdes)):
         error[key] = []
 
+    NUM_TIME_STEPS = 7
+    times = np.linspace(0, max_ssfde_duration_s, NUM_TIME_STEPS)
+
     # TODO: implement this error!
-    anytime_error : Dict[int, List] = {}
-    for key in range(len(ssfdes)):
-        anytime_error[key] = []
+    anytime_errors  = []
+    for i in range(len(ssfdes)):
+        anytime_errors.append([])
+
+    print(anytime_errors)
 
     first = True
     x0_prev = np.zeros((3, 1))
+    data_times = []
     for tt in truth.getTimes():
         if time_range[0] <= tt and tt < time_range[1]:
             for mt in meas.getTimes():
@@ -53,16 +62,25 @@ def evaluate(truth: ITruth, meas: IMeasurement, ssfdes: List[Callable[[np.ndarra
                             bias = 211300 # Estimated from data
                             first = False
                         else:
+                            data_times.append(tt)
                             x0_curr = truth.getTruth(tt)
                             z, H, hx = create_measurement_model(x0_curr, bias, meas.getMeas(tt))
                             deltax_gt = x0_curr - x0_prev
                             x0_prev = x0_curr
                             for i, ssfde_cb in enumerate(ssfdes):
                                 ssfde = ssfde_cb(H, z - hx) # Use z - h(x) as the "measurement" for an error state
-                                outputs = ssfde.fde(z.shape[0], 4, max_duration_s=max_ssfde_duration_s)
-                                output = outputs[-1] # Get last output (the best solution)
+                                output_list = ssfde.fde(z.shape[0], 4+1, max_duration_s=max_ssfde_duration_s)
+
+                                # Store all errors from each anytime solutions
+                                error_list = []
+                                for j, t in enumerate(times):
+                                    _, sol, time_elapsed = get_output(t, output_list)
+                                    error_list.append(np.linalg.norm(sol[0][0:3,:] - deltax_gt))
+                                anytime_errors[i].append(error_list)
+
+                                output = output_list[-1] # Get last output (the best solution)
                                 xhat, Phat, Ihat = output[1]
-                                print(f"Excluded {z.shape[0] - np.sum(output[0])} measurements")
+                                print(f"Excluded {z.shape[0] - np.sum(output[0])} measurements at time: {tt}")
                                 print(xhat)
                                 print(deltax_gt)
                                 error[i].append((xhat[0:3,:] - deltax_gt).T @ (xhat[0:3,:] - deltax_gt))
@@ -74,3 +92,29 @@ def evaluate(truth: ITruth, meas: IMeasurement, ssfdes: List[Callable[[np.ndarra
             sum += err
         rmse = np.sqrt(sum / len(error[key]))
         print(f"RMSE for SSFDE {key}: {rmse}")
+
+    plt.rcParams['font.size'] = 16
+
+    now = datetime.now()
+    filestamp = now.strftime("%Y%m%d_%H%M%S")
+
+    # Create three horizontal subplots
+    fig, axes = plt.subplots(1, len(ssfdes), figsize=(8, 6))
+
+    try:
+        iter(axes)
+    except TypeError:
+        axes = [axes] # Make axes object iterable!
+
+    # Plot solution error
+    for i, ax in enumerate(axes):
+        ax.set_xlabel("Time [s]")
+        ax.plot(times, anytime_errors[i][-1])
+        ax.set_ylabel("Error Magnitude [m]")
+        ax.set_title(f"Solution Update at Time={data_times[-1]}")
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+    plt.tight_layout()
+    plt.savefig("data/" + "evaluate" + "_" + filestamp + "_fig.png")
+    plt.show()
