@@ -39,7 +39,7 @@ def evaluate(truth: ITruth, meas: IMeasurement, ssfdes: List[Callable[[np.ndarra
     for key in range(len(ssfdes)):
         error[key] = []
 
-    NUM_TIME_STEPS = 7
+    NUM_TIME_STEPS = 100
     times = np.linspace(0, max_ssfde_duration_s, NUM_TIME_STEPS)
 
     # TODO: implement this error!
@@ -80,7 +80,7 @@ def evaluate(truth: ITruth, meas: IMeasurement, ssfdes: List[Callable[[np.ndarra
 
                                 output = output_list[-1] # Get last output (the best solution)
                                 xhat, Phat, Ihat = output[1]
-                                print(f"Excluded {z.shape[0] - np.sum(output[0])} measurements at time: {tt}")
+                                print(f"Excluded {z.shape[0] - np.sum(output[0])} measurements out of {z.shape[0]} at time: {tt}")
                                 print(xhat)
                                 print(deltax_gt)
                                 error[i].append((xhat[0:3,:] - deltax_gt).T @ (xhat[0:3,:] - deltax_gt))
@@ -111,9 +111,8 @@ def evaluate(truth: ITruth, meas: IMeasurement, ssfdes: List[Callable[[np.ndarra
         ax.set_xlabel("Time [s]")
         ax.plot(times, anytime_errors[i][-1])
         ax.set_ylabel("Error Magnitude [m]")
-        ax.set_title(f"Solution Update at Time={data_times[-1]}")
+        ax.set_title(f"Best Solution at Timestamp={data_times[-1]}")
         ax.grid(True, alpha=0.3)
-        ax.legend()
 
     plt.tight_layout()
     plt.savefig("data/" + "evaluate" + "_" + filestamp + "_fig.png")

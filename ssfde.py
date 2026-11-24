@@ -149,6 +149,8 @@ class SSFDE:
         self.__i = 0
         self.__duration_s = 10
         self.__duration_exceeded = False
+        self.__num_ss_calcs = 0
+        self.__num_subsets_evald = 0
 
         if self.__params.heuristic == "chi2":
             self.__heuristic = lambda H, z, init_subset, curr_subset: chi2stat(H, z, curr_subset) 
@@ -219,7 +221,7 @@ class SSFDE:
                                     curr_best_subset = new_subset
                                     stop_s = time.perf_counter()
                                     output.append((curr_best_subset, mle(self.__params.H, self.__params.z, curr_best_subset), stop_s - self.__start_s))
-                                    print(f"Found a better solution with {np.sum(curr_best_subset)} measurements!")
+                                    print(f"Found a better solution with {np.sum(curr_best_subset)} measurements at {(stop_s - self.__start_s):0.6} s!")
                                 else:
                                     print(f"WARNING: Exceeded {self.__duration_s} s duration!")
                                     pq = [] # empty the queue! we are finished
@@ -229,7 +231,7 @@ class SSFDE:
 
         stop_s = time.perf_counter()
         if not self.__duration_exceeded:
-            print(f"Optimal solution found in {(stop_s - self.__start_s):0.3} s!")
+            print(f"Optimal solution found in {(stop_s - self.__start_s):0.6} s with {self.__num_ss_calcs} SS stat calcs from evaluating {self.__num_subsets_evald} subsets!")
         if np.sum(curr_best_subset) > Nmin: # Found solution that is not the trivial all_in_view solution
             best_sol : Solution = mle(self.__params.H, self.__params.z, curr_best_subset)
             output.append((curr_best_subset, best_sol, stop_s - self.__start_s))
@@ -252,6 +254,7 @@ class SSFDE:
         # Initialize queue with a subset
         pq : List[Tuple[float, int, SSFDE.PqType]] = []
         heapq.heappush(pq, (0, SSFDE.PqType(subset)))
+        self.__num_subsets_evald += 1
 
         # Try to make a decision before going through all the options using bounds
         quick_decision = test_stat.evalNoSubset() 
@@ -279,6 +282,7 @@ class SSFDE:
 
                     if np.sum(new_subset) >= Nmin:
                         passes, priority = test_stat.eval(new_subset)
+                        self.__num_ss_calcs += 1
 
                         if verbose:
                             print(f"\tSS test with subset: {new_subset}")

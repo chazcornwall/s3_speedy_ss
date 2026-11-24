@@ -28,8 +28,8 @@ def main():
 
     # time_range=(15,20) for a single detected fault (5s max duration)
     # time_range=(500, 504) for a double detected fault (5s max duration)
-    # time_range=(850, 855) for no detected fault (500s max duration)
-    evaluate(rt, rm, [create_our_ssfde], time_range=(15, 20), max_ssfde_duration_s=5.0)
+    # time_range=(853, 855) for no detected fault (50s max duration)
+    evaluate(rt, rm, [create_our_ssfde], time_range=(500, 504), max_ssfde_duration_s=5.0)
 
     # Call evaluate function!
 
