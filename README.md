@@ -1,5 +1,9 @@
 # s3_speedy_ss
 
+![](data/test_ssfde_all_20261112_114242_fig.png)
+
+Code for our speedy solution separation (S3) algorithm. Using our novel ordering to find fault-free measurement subsets, we can quickly find near-optimal solutions with large numbers of measurements and faults. The image above shows our method is nearly able to have the same error as an omniscient estimator even with over 60 measurements and 25 faults.
+
 Code is only verified to work on Ubuntu 24.04. The `requirements.txt` package shows versions of imported packages.
 
 The main SS-FDE algorithm can be found in `ssfde.py`. When running locally, if one does not already exist, create a `data` directory within the repo before running any test. Simulation results will save to this directory
