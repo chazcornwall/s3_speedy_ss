@@ -171,9 +171,12 @@ class SSFDE:
         ---
         N : int, Number of measurements
         Nmin : int, Minimum number of measurements (Assumes maximum number of faults is N - Nmin)
+        max_duration_s : float, Maximum time in seconds to exclude faults
+        verbose : bool, Print extra information
 
         Returns
         ---
+        All solutions identified during convergence.
         Largest subset that passes the solution separation test or None if no fault-free subsets exist
         """
         # Initialize queue with all possible measurements
@@ -237,7 +240,7 @@ class SSFDE:
             output.append((curr_best_subset, best_sol, stop_s - self.__start_s))
         return output
 
-    def eval_subset(self, subset: Subset, meas: int, Nmin: int, verbose: bool = True) -> Union[float, None]:
+    def eval_subset(self, subset: Subset, Nmin: int, verbose: bool = True) -> Union[float, None]:
         """
         Prioritizes subsets that may contain a fault, e.g. test statistic passes but is very large. The faster we detect a fault,
         the faster we can stop iterating and move on to the next candidate.

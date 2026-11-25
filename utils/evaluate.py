@@ -6,7 +6,7 @@ from typing import List, Tuple, Dict, Callable
 from truth.i_truth import ITruth, TruthType
 from measurements.i_measurement import IMeasurement, MeasType
 from ssfde import SSFDE, SSFDEParams
-from utils import get_output
+from utils.utils import get_output
 
 
 def create_measurement_model(x0: np.ndarray, bias: float, measurements: List[MeasType]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -42,7 +42,6 @@ def evaluate(truth: ITruth, meas: IMeasurement, ssfdes: List[Callable[[np.ndarra
     NUM_TIME_STEPS = 100
     times = np.linspace(0, max_ssfde_duration_s, NUM_TIME_STEPS)
 
-    # TODO: implement this error!
     anytime_errors  = []
     for i in range(len(ssfdes)):
         anytime_errors.append([])

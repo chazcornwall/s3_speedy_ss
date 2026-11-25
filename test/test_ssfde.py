@@ -2,21 +2,22 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 from ssfde import SSFDEParams, SSFDE, NormalThreshold, mle
-from utils import BaselineTest, NormalThreshold, random_measurement_model_with_faults, BlanchTest, OurTest, RandomMeasurementModel, create_subset_mask, create_B_from_subset, get_output
+from utils.utils import BaselineTest, NormalThreshold, random_measurement_model_with_faults, BlanchTest, OurTest, RandomMeasurementModel, create_subset_mask, create_B_from_subset, get_output
 
 plt.rcParams['font.size'] = 16
 
 Ntrials = 100
-N = 15 # Measurement dimension 30
-Nf = 7 # 7
+N = 15 # Measurement dimension 
+Nf = 7 # Number of faults
 M = 4 # State dimension
 T_MAX = 1.0 # Max time
 NUM_TIME_STEPS = 7
 fault_bias = (-100, 100)
 NT = NormalThreshold(1e-10, dof=M)
 LOAD_DATA = False
-ERROR_FILE_NAME = "test_ssfde_all_20261112_110903_errors.npy"
-TIMES_FILE_NAME = "test_ssfde_all_20261112_110903_times.npy"
+DATA_TIMESTAMP = "20261112_121655"
+ERROR_FILE_NAME = "test_ssfde_all_" + DATA_TIMESTAMP + "_errors.npy"
+TIMES_FILE_NAME = "test_ssfde_all_" + DATA_TIMESTAMP + "_times.npy"
 
 
 def test_ssfde_baseline():
@@ -120,6 +121,7 @@ def test_ssfde_all():
     else:
         errors = np.load("data/" + ERROR_FILE_NAME)
         times = np.load("data/" + TIMES_FILE_NAME)
+        filestamp = DATA_TIMESTAMP
     
     # Create three horizontal subplots
     fig, axes = plt.subplots(1, 4, figsize=(15, 4))
@@ -138,7 +140,7 @@ def test_ssfde_all():
         vp = ax.violinplot(np.linalg.norm(errors[i], axis=0), times, showmeans=True, widths=violion_plot_width)
         ax.set_xlabel("Time [s]")
         if i == 0:
-            ax.set_ylabel("Root Squared Error [m]")
+            ax.set_ylabel("Error Magnitude [m]")
         ax.set_xlim(-violion_plot_width, T_MAX+violion_plot_width)
         ax.set_ylim(0, max_rmse + 0.1)
         ax.set_title(METHODS[i])
@@ -152,7 +154,7 @@ def test_ssfde_all():
         handles=[handles[-1]],
         labels=[labels[-1]],
         loc="upper center",          # Alignment point of the legend box
-        bbox_to_anchor=(0.5, 0.1), # Coordinates relative to the figure (x, y) # bbox_to_achor=(0.5, 0.05) when creating introduction image
+        bbox_to_anchor=(0.5, 0.14), # Coordinates relative to the figure (x, y) # bbox_to_achor=(0.5, 0.05) when creating introduction image
         ncols=2                      # Make the legend layout horizontal
     )
 

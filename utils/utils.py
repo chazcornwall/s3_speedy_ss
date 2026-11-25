@@ -7,9 +7,6 @@ import time
 
 
 SOLUTION_HASH_MAP : Dict[Tuple[bool, ...], Solution] = {}
-
-
-# We assume only selecting for the vertical component (y) in the SS test statistics
 Y = 1
 
 
@@ -23,6 +20,10 @@ def sym_sqrt(A: np.ndarray) -> np.ndarray:
     eigvals, Q = np.linalg.eig(A)
     Lambda = np.diag(eigvals)
     return Q @ np.sqrt(Lambda) @ Q.T
+
+'''
+Define some utilities for generating faults and random measurement models
+'''
 
 def fault_generator(N: int, Nf: Union[int, Tuple], Nmin, bias: Tuple) -> Tuple[np.ndarray, np.ndarray]:
     if isinstance(Nf, int):
@@ -85,6 +86,9 @@ class RandomMeasurementModel:
         znorm = self.Linv @ z
         return self.Hnorm, znorm, self.x_gt, self.f_indices
 
+'''
+Implement different tests that use bounds on the SS statistic to accelerate SS tests
+'''
 
 class BaselineTest(ITest):
 

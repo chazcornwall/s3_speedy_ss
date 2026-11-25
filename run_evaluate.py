@@ -2,9 +2,9 @@ import argparse
 from truth.recorded_truth import RecordedTruth
 from measurements.recorded_measurement import RecordedMeasurement
 from measurements.generated_measurement import GeneratedMeasurement, GeneratedMeasurementParams
-from evaluate import evaluate
+from utils.evaluate import evaluate
 from ssfde import NormalThreshold, SSFDE, SSFDEParams
-from utils import BaselineTest
+from utils.utils import BaselineTest
 
 
 URBAN_NAV_HARSH_GT = "recorded_data/UrbanNav_HK_Harsh_Urban_GT.txt"
@@ -30,8 +30,6 @@ def main():
     # time_range=(500, 504) for a double detected fault (5s max duration)
     # time_range=(853, 855) for no detected fault (50s max duration)
     evaluate(rt, rm, [create_our_ssfde], time_range=(500, 504), max_ssfde_duration_s=5.0)
-
-    # Call evaluate function!
 
 
 if __name__ == "__main__":
